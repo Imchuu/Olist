@@ -20,6 +20,39 @@ _MAX_RETRIES = 3
 _RETRY_DELAY = 2.0  # seconds between retries
 
 
+def check_local_llm_connection(required_model: Optional[str] = None) -> bool:
+    """Check whether LM Studio local API is reachable and model is available.
+
+    Args:
+        required_model: Optional model name that must exist in /models list.
+
+    Returns:
+        True if local API responds and (if provided) model is available.
+    """
+    base_url = get_local_api_base_url()
+    models_url = f"{base_url}/models"
+    try:
+        response = requests.get(models_url, timeout=5)
+        response.raise_for_status()
+        if required_model:
+            payload = response.json()
+            model_items = payload.get("data", []) if isinstance(payload, dict) else []
+            available_models = {
+                str(item.get("id", "")).strip() for item in model_items if isinstance(item, dict)
+            }
+            if required_model not in available_models:
+                logger.error(
+                    "LM Studio is reachable but model '%s' is not loaded. Available: %s",
+                    required_model,
+                    sorted(m for m in available_models if m),
+                )
+                return False
+        return True
+    except requests.exceptions.RequestException as exc:
+        logger.error("LM Studio connection check failed: %s", exc)
+        return False
+
+
 def call_llm(
     system_prompt: str,
     user_prompt: str,

@@ -5,7 +5,7 @@ from typing import Optional
 
 import pandas as pd
 
-from .config import get_narrative_model, get_llm_temperature
+from .config import get_narrative_model, get_llm_temperature, get_fail_fast_on_llm_error
 from .llm_predictor import call_llm
 from .prompt_builder import build_narrative_system_prompt, build_narrative_user_prompt
 
@@ -59,6 +59,11 @@ def generate_customer_narrative(
         return narrative
     except Exception as exc:  # noqa: BLE001
         logger.error("Narrative generation failed for customer %s: %s", customer_id, exc)
+        if get_fail_fast_on_llm_error():
+            raise ConnectionError(
+                "Phase 1 stopped due to LLM call failure. "
+                "Please ensure LM Studio local server is running and model 'local-model' is loaded."
+            ) from exc
         # Return a minimal fallback narrative so Phase 2 can still proceed
         return (
             f"Customer Summary:\n"

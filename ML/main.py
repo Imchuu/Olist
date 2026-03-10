@@ -20,24 +20,43 @@ Run from project root:
 
 import logging
 import sys
+from pathlib import Path
 
 import pandas as pd
 
-from .config import (
-    get_input_path,
-    get_output_path,
-    get_phase1_output_path,
-    get_stop_after_phase1,
-    get_llm_model,
-    get_llm_temperature,
-)
-from .data_loader import load_dataset, validate_dataset
-from .feature_aggregator import aggregate_to_customer_level
-from .profile_generator import generate_all_profiles
-from .prompt_builder import build_system_prompt, build_user_prompt
-from .llm_predictor import call_llm
-from .probability_parser import safe_parse_probability
-from .utils import ensure_output_dir, save_predictions
+if __package__ in (None, ""):
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+    from ML.config import (  # type: ignore
+        get_input_path,
+        get_output_path,
+        get_phase1_output_path,
+        get_stop_after_phase1,
+        get_llm_model,
+        get_llm_temperature,
+    )
+    from ML.data_loader import load_dataset, validate_dataset  # type: ignore
+    from ML.feature_aggregator import aggregate_to_customer_level  # type: ignore
+    from ML.profile_generator import generate_all_profiles  # type: ignore
+    from ML.prompt_builder import build_system_prompt, build_user_prompt  # type: ignore
+    from ML.llm_predictor import call_llm, check_local_llm_connection  # type: ignore
+    from ML.probability_parser import safe_parse_probability  # type: ignore
+    from ML.utils import ensure_output_dir, save_predictions  # type: ignore
+else:
+    from .config import (
+        get_input_path,
+        get_output_path,
+        get_phase1_output_path,
+        get_stop_after_phase1,
+        get_llm_model,
+        get_llm_temperature,
+    )
+    from .data_loader import load_dataset, validate_dataset
+    from .feature_aggregator import aggregate_to_customer_level
+    from .profile_generator import generate_all_profiles
+    from .prompt_builder import build_system_prompt, build_user_prompt
+    from .llm_predictor import call_llm, check_local_llm_connection
+    from .probability_parser import safe_parse_probability
+    from .utils import ensure_output_dir, save_predictions
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -72,6 +91,13 @@ def run_flow2_pipeline() -> pd.DataFrame:
     customers_df = aggregate_to_customer_level(orders_df)
     logger.info("Customer-level features ready: %d customers", len(customers_df))
 
+    preflight_model = get_llm_model()
+    if not check_local_llm_connection(required_model=preflight_model):
+        raise ConnectionError(
+            "Cannot connect to LM Studio at http://localhost:1234/v1. "
+            "Please start LM Studio local server and load a model named 'local-model'."
+        )
+
     # ------------------------------------------------------------------
     # Phase 1 – Step 3: Generate narratives (LLM #1)
     # ------------------------------------------------------------------
@@ -94,7 +120,7 @@ def run_flow2_pipeline() -> pd.DataFrame:
     # ------------------------------------------------------------------
     logger.info("=== Flow 2 — Phase 2: Satisfaction Prediction ===")
     system_prompt = build_system_prompt()
-    model = get_llm_model()
+    model = preflight_model
     temperature = get_llm_temperature()
 
     customer_ids: list[str] = []

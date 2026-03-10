@@ -108,3 +108,12 @@ def get_stop_after_phase1() -> bool:
         True to generate narratives then stop.
     """
     return True
+
+
+def get_fail_fast_on_llm_error() -> bool:
+    """Return whether pipeline should stop immediately on LLM failures.
+
+    Returns:
+        True to stop immediately when local LLM call fails.
+    """
+    return True
