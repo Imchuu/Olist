@@ -6,21 +6,9 @@ from typing import Union
 
 import pandas as pd
 
+from .config import DATETIME_COLUMNS, REQUIRED_DATASET_COLUMNS
+
 logger = logging.getLogger(__name__)
-
-REQUIRED_COLUMNS = [
-    "customer_unique_id",
-    "order_id",
-    "review_score",
-    "price",
-    "freight_value",
-    "order_purchase_timestamp",
-    "order_delivered_customer_date",
-    "order_estimated_delivery_date",
-    "payment_type",
-    "product_category_name_english",
-]
-
 
 def load_dataset(path: Union[str, Path]) -> pd.DataFrame:
     """Load the order-level dataset from disk.
@@ -45,14 +33,7 @@ def load_dataset(path: Union[str, Path]) -> pd.DataFrame:
     logger.info("Loading dataset from %s", path)
     df = pd.read_csv(path, encoding="utf-8", low_memory=False)
 
-    datetime_cols = [
-        "order_purchase_timestamp",
-        "order_delivered_customer_date",
-        "order_estimated_delivery_date",
-        "order_approved_at",
-        "order_delivered_carrier_date",
-    ]
-    for col in datetime_cols:
+    for col in DATETIME_COLUMNS:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce")
 
@@ -73,7 +54,7 @@ def validate_dataset(df: pd.DataFrame) -> bool:
     Raises:
         ValueError: If required columns are missing or data quality fails.
     """
-    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    missing = [c for c in REQUIRED_DATASET_COLUMNS if c not in df.columns]
     if missing:
         raise ValueError(f"Dataset missing required columns: {missing}")
 

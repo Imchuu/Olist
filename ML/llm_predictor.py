@@ -7,18 +7,17 @@ from typing import Optional
 import requests
 
 from .config import (
-    get_local_api_base_url,
-    get_llm_model,
-    get_llm_temperature,
-    get_request_timeout,
+    CHAT_ENDPOINT,
+    CONNECTION_CHECK_TIMEOUT,
+    LOCAL_API_BASE_URL,
+    LLM_MODEL,
+    LLM_TEMPERATURE,
+    MAX_RETRIES,
+    REQUEST_TIMEOUT,
+    RETRY_DELAY_SECONDS,
 )
 
 logger = logging.getLogger(__name__)
-
-_CHAT_ENDPOINT = "/chat/completions"
-_MAX_RETRIES = 3
-_RETRY_DELAY = 2.0  # seconds between retries
-
 
 def check_local_llm_connection(required_model: Optional[str] = None) -> bool:
     """Check whether LM Studio local API is reachable and model is available.
@@ -29,10 +28,9 @@ def check_local_llm_connection(required_model: Optional[str] = None) -> bool:
     Returns:
         True if local API responds and (if provided) model is available.
     """
-    base_url = get_local_api_base_url()
-    models_url = f"{base_url}/models"
+    models_url = f"{LOCAL_API_BASE_URL}/models"
     try:
-        response = requests.get(models_url, timeout=5)
+        response = requests.get(models_url, timeout=CONNECTION_CHECK_TIMEOUT)
         response.raise_for_status()
         if required_model:
             payload = response.json()
@@ -58,17 +56,19 @@ def call_llm(
     user_prompt: str,
     model: Optional[str] = None,
     temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
 ) -> str:
     """Send a prompt pair to local LM Studio API and return response text.
 
     Uses the OpenAI-compatible /chat/completions endpoint.
-    Retries up to _MAX_RETRIES times on transient failures.
+    Retries according to configured max retries on transient failures.
 
     Args:
         system_prompt: Sets the model's role and output format.
         user_prompt: The customer profile or narrative to process.
         model: Local model name; defaults to config value.
         temperature: Generation temperature; 0.0 for deterministic output.
+        max_tokens: Optional output token cap for faster inference.
 
     Returns:
         Raw text content from the model's response.
@@ -77,10 +77,11 @@ def call_llm(
         ConnectionError: If local server is unreachable after all retries.
         ValueError: If the response is malformed or empty.
     """
-    model = model or get_llm_model()
-    temperature = temperature if temperature is not None else get_llm_temperature()
-    base_url = get_local_api_base_url()
-    url = f"{base_url}{_CHAT_ENDPOINT}"
+    model = model or LLM_MODEL
+    temperature = temperature if temperature is not None else LLM_TEMPERATURE
+    max_retries = MAX_RETRIES
+    retry_delay = RETRY_DELAY_SECONDS
+    url = f"{LOCAL_API_BASE_URL}{CHAT_ENDPOINT}"
 
     payload = {
         "model": model,
@@ -90,12 +91,14 @@ def call_llm(
         ],
         "temperature": temperature,
     }
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
 
     last_exc: Exception = RuntimeError("No attempts made.")
-    for attempt in range(1, _MAX_RETRIES + 1):
+    for attempt in range(1, max_retries + 1):
         try:
-            logger.debug("LLM call attempt %d/%d  model=%s", attempt, _MAX_RETRIES, model)
-            response = requests.post(url, json=payload, timeout=get_request_timeout())
+            logger.debug("LLM call attempt %d/%d  model=%s", attempt, max_retries, model)
+            response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
             data = response.json()
             content = data["choices"][0]["message"]["content"]
@@ -113,11 +116,11 @@ def call_llm(
             last_exc = exc
             logger.warning("Bad response format (attempt %d): %s", attempt, exc)
 
-        if attempt < _MAX_RETRIES:
-            time.sleep(_RETRY_DELAY)
+        if attempt < max_retries:
+            time.sleep(retry_delay)
 
     raise ConnectionError(
-        f"LM Studio API failed after {_MAX_RETRIES} attempts. Last error: {last_exc}"
+        f"LM Studio API failed after {max_retries} attempts. Last error: {last_exc}"
     )
 
 

@@ -18,6 +18,7 @@ Run from project root:
     python -m ML.main
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import sys
 from pathlib import Path
@@ -27,12 +28,17 @@ import pandas as pd
 if __package__ in (None, ""):
     sys.path.append(str(Path(__file__).resolve().parent.parent))
     from ML.config import (  # type: ignore
-        get_input_path,
-        get_output_path,
-        get_phase1_output_path,
-        get_stop_after_phase1,
-        get_llm_model,
-        get_llm_temperature,
+        INPUT_PATH,
+        LOCAL_API_BASE_URL,
+        MAX_CUSTOMERS,
+        MAX_WORKERS,
+        LLM_MODEL_PHASE2,
+        LLM_TEMPERATURE,
+        OUTPUT_PATH,
+        PHASE2_MAX_TOKENS,
+        PHASE1_OUTPUT_PATH,
+        PROGRESS_LOG_EVERY_N,
+        STOP_AFTER_PHASE1,
     )
     from ML.data_loader import load_dataset, validate_dataset  # type: ignore
     from ML.feature_aggregator import aggregate_to_customer_level  # type: ignore
@@ -40,15 +46,26 @@ if __package__ in (None, ""):
     from ML.prompt_builder import build_system_prompt, build_user_prompt  # type: ignore
     from ML.llm_predictor import call_llm, check_local_llm_connection  # type: ignore
     from ML.probability_parser import safe_parse_probability  # type: ignore
-    from ML.utils import ensure_output_dir, save_predictions  # type: ignore
+    from ML.utils import (  # type: ignore
+        ProgressBar,
+        append_csv_row,
+        ensure_output_dir,
+        load_existing_value_map,
+        save_predictions,
+    )
 else:
     from .config import (
-        get_input_path,
-        get_output_path,
-        get_phase1_output_path,
-        get_stop_after_phase1,
-        get_llm_model,
-        get_llm_temperature,
+        INPUT_PATH,
+        LOCAL_API_BASE_URL,
+        MAX_CUSTOMERS,
+        MAX_WORKERS,
+        LLM_MODEL_PHASE2,
+        LLM_TEMPERATURE,
+        OUTPUT_PATH,
+        PHASE2_MAX_TOKENS,
+        PHASE1_OUTPUT_PATH,
+        PROGRESS_LOG_EVERY_N,
+        STOP_AFTER_PHASE1,
     )
     from .data_loader import load_dataset, validate_dataset
     from .feature_aggregator import aggregate_to_customer_level
@@ -56,7 +73,13 @@ else:
     from .prompt_builder import build_system_prompt, build_user_prompt
     from .llm_predictor import call_llm, check_local_llm_connection
     from .probability_parser import safe_parse_probability
-    from .utils import ensure_output_dir, save_predictions
+    from .utils import (
+        ProgressBar,
+        append_csv_row,
+        ensure_output_dir,
+        load_existing_value_map,
+        save_predictions,
+    )
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -79,7 +102,7 @@ def run_flow2_pipeline() -> pd.DataFrame:
     # ------------------------------------------------------------------
     # Phase 1 – Step 1: Load dataset
     # ------------------------------------------------------------------
-    input_path = get_input_path()
+    input_path = INPUT_PATH
     logger.info("=== Flow 2 — Phase 1: Narrative Generation ===")
     logger.info("Loading dataset: %s", input_path)
     orders_df = load_dataset(input_path)
@@ -89,25 +112,46 @@ def run_flow2_pipeline() -> pd.DataFrame:
     # Phase 1 – Step 2: Aggregate to customer level
     # ------------------------------------------------------------------
     customers_df = aggregate_to_customer_level(orders_df)
+    if MAX_CUSTOMERS > 0:
+        customers_df = customers_df.head(MAX_CUSTOMERS).copy()
+        logger.info("Benchmark mode: limiting to first %d customers", len(customers_df))
     logger.info("Customer-level features ready: %d customers", len(customers_df))
 
-    preflight_model = get_llm_model()
+    preflight_model = LLM_MODEL_PHASE2
     if not check_local_llm_connection(required_model=preflight_model):
         raise ConnectionError(
-            "Cannot connect to LM Studio at http://localhost:1234/v1. "
-            "Please start LM Studio local server and load a model named 'local-model'."
+            f"Cannot connect to LM Studio at {LOCAL_API_BASE_URL}. "
+            f"Please start LM Studio local server and load model '{LLM_MODEL_PHASE2}'."
         )
 
     # ------------------------------------------------------------------
     # Phase 1 – Step 3: Generate narratives (LLM #1)
     # ------------------------------------------------------------------
-    customers_with_profiles = generate_all_profiles(customers_df)
+    phase1_output = PHASE1_OUTPUT_PATH
+    existing_profiles = load_existing_value_map(
+        path=phase1_output,
+        id_column="customer_id",
+        value_column="profile_text",
+    )
+    if existing_profiles:
+        logger.info("Found %d existing Phase 1 narratives. Will resume from checkpoint.", len(existing_profiles))
 
-    if get_stop_after_phase1():
-        phase1_output = get_phase1_output_path()
+    def _on_phase1_generated(customer_id: str, profile_text: str) -> None:
+        append_csv_row(
+            output_path=phase1_output,
+            fieldnames=["customer_id", "profile_text"],
+            row={"customer_id": customer_id, "profile_text": profile_text},
+        )
+
+    customers_with_profiles = generate_all_profiles(
+        customers_df,
+        existing_profiles=existing_profiles,
+        on_profile_generated=_on_phase1_generated,
+    )
+
+    if STOP_AFTER_PHASE1:
         ensure_output_dir(phase1_output)
         phase1_df = customers_with_profiles[["customer_id", "profile_text"]].copy()
-        phase1_df.to_csv(phase1_output, index=False)
         logger.info(
             "Stop-after-Phase-1 mode is ON. Saved %d narratives to %s",
             len(phase1_df),
@@ -119,18 +163,30 @@ def run_flow2_pipeline() -> pd.DataFrame:
     # Phase 2 – Steps 4-5: Predict satisfaction probability
     # ------------------------------------------------------------------
     logger.info("=== Flow 2 — Phase 2: Satisfaction Prediction ===")
+    logger.info("Phase 2 using %d worker(s)", MAX_WORKERS)
     system_prompt = build_system_prompt()
     model = preflight_model
-    temperature = get_llm_temperature()
+    temperature = LLM_TEMPERATURE
 
-    customer_ids: list[str] = []
-    probabilities: list[float] = []
-    total = len(customers_with_profiles)
+    rows = customers_with_profiles[["customer_id", "profile_text"]].to_dict("records")
+    total = len(rows)
+    customer_ids: list[str] = [""] * total
+    probabilities: list[float] = [0.5] * total
+    progress_every = PROGRESS_LOG_EVERY_N
+    progress_bar = ProgressBar(total=total, label="Phase 2")
 
-    for _, row in customers_with_profiles.iterrows():
-        cid = str(row["customer_id"])
-        narrative = str(row["profile_text"])
+    output_path = OUTPUT_PATH
+    existing_phase2 = load_existing_value_map(
+        path=output_path,
+        id_column="customer_id",
+        value_column="P_LLM",
+    )
+    if existing_phase2:
+        logger.info("Found %d existing Phase 2 predictions. Will resume from checkpoint.", len(existing_phase2))
 
+    def _predict_one(idx: int, row_dict: dict) -> tuple[int, str, float]:
+        cid = str(row_dict["customer_id"])
+        narrative = str(row_dict["profile_text"])
         user_prompt = build_user_prompt(profile_text=narrative, customer_id=cid)
 
         try:
@@ -139,23 +195,74 @@ def run_flow2_pipeline() -> pd.DataFrame:
                 user_prompt=user_prompt,
                 model=model,
                 temperature=temperature,
+                max_tokens=PHASE2_MAX_TOKENS,
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("Phase 2 LLM call failed for customer %s: %s", cid, exc)
             response_text = ""
 
         prob = safe_parse_probability(response_text, default=0.5)
+        return idx, cid, prob
 
-        customer_ids.append(cid)
-        probabilities.append(prob)
+    completed = 0
+    if MAX_WORKERS <= 1:
+        for i, row_dict in enumerate(rows):
+            cid = str(row_dict["customer_id"])
+            if cid in existing_phase2:
+                customer_ids[i] = cid
+                probabilities[i] = float(existing_phase2[cid])
+                completed += 1
+                progress_bar.update(completed)
+                if completed % progress_every == 0 or completed == total:
+                    logger.info("  Phase 2 progress: %d / %d", completed, total)
+                continue
 
-        if (len(customer_ids)) % 50 == 0 or len(customer_ids) == total:
-            logger.info("  Phase 2 progress: %d / %d", len(customer_ids), total)
+            idx, cid, prob = _predict_one(i, row_dict)
+            customer_ids[idx] = cid
+            probabilities[idx] = prob
+            append_csv_row(
+                output_path=output_path,
+                fieldnames=["customer_id", "P_LLM"],
+                row={"customer_id": cid, "P_LLM": prob},
+            )
+            completed += 1
+            progress_bar.update(completed)
+            if completed % progress_every == 0 or completed == total:
+                logger.info("  Phase 2 progress: %d / %d", completed, total)
+    else:
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = []
+            for i, row_dict in enumerate(rows):
+                cid = str(row_dict["customer_id"])
+                if cid in existing_phase2:
+                    customer_ids[i] = cid
+                    probabilities[i] = float(existing_phase2[cid])
+                    completed += 1
+                    progress_bar.update(completed)
+                    if completed % progress_every == 0 or completed == total:
+                        logger.info("  Phase 2 progress: %d / %d", completed, total)
+                    continue
+                futures.append(executor.submit(_predict_one, i, row_dict))
+
+            for future in as_completed(futures):
+                idx, cid, prob = future.result()
+                customer_ids[idx] = cid
+                probabilities[idx] = prob
+                append_csv_row(
+                    output_path=output_path,
+                    fieldnames=["customer_id", "P_LLM"],
+                    row={"customer_id": cid, "P_LLM": prob},
+                )
+                completed += 1
+                progress_bar.update(completed)
+                if completed % progress_every == 0 or completed == total:
+                    logger.info("  Phase 2 progress: %d / %d", completed, total)
+
+    progress_bar.finish()
 
     # ------------------------------------------------------------------
     # Step 6: Save results
     # ------------------------------------------------------------------
-    output_path = get_output_path()
     ensure_output_dir(output_path)
     save_predictions(
         customer_ids=customer_ids,
