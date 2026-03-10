@@ -32,6 +32,7 @@ if __package__ in (None, ""):
         LOCAL_API_BASE_URL,
         MAX_CUSTOMERS,
         MAX_WORKERS,
+        LLM_MODEL_PHASE1,
         LLM_MODEL_PHASE2,
         LLM_TEMPERATURE,
         OUTPUT_PATH,
@@ -59,6 +60,7 @@ else:
         LOCAL_API_BASE_URL,
         MAX_CUSTOMERS,
         MAX_WORKERS,
+        LLM_MODEL_PHASE1,
         LLM_MODEL_PHASE2,
         LLM_TEMPERATURE,
         OUTPUT_PATH,
@@ -117,11 +119,12 @@ def run_flow2_pipeline() -> pd.DataFrame:
         logger.info("Benchmark mode: limiting to first %d customers", len(customers_df))
     logger.info("Customer-level features ready: %d customers", len(customers_df))
 
-    preflight_model = LLM_MODEL_PHASE2
+    # Phase 1 should validate the model used by narrative generation.
+    preflight_model = LLM_MODEL_PHASE1
     if not check_local_llm_connection(required_model=preflight_model):
         raise ConnectionError(
             f"Cannot connect to LM Studio at {LOCAL_API_BASE_URL}. "
-            f"Please start LM Studio local server and load model '{LLM_MODEL_PHASE2}'."
+            f"Please start LM Studio local server and load model '{LLM_MODEL_PHASE1}'."
         )
 
     # ------------------------------------------------------------------
@@ -164,8 +167,17 @@ def run_flow2_pipeline() -> pd.DataFrame:
     # ------------------------------------------------------------------
     logger.info("=== Flow 2 — Phase 2: Satisfaction Prediction ===")
     logger.info("Phase 2 using %d worker(s)", MAX_WORKERS)
+
+    # Before Phase 2 starts, validate that the Phase 2 model is available.
+    if not check_local_llm_connection(required_model=LLM_MODEL_PHASE2):
+        raise ConnectionError(
+            f"Phase 1 completed. Cannot start Phase 2 because model '{LLM_MODEL_PHASE2}' "
+            f"is not loaded in LM Studio at {LOCAL_API_BASE_URL}. "
+            "Please load the Phase 2 model, then rerun."
+        )
+
     system_prompt = build_system_prompt()
-    model = preflight_model
+    model = LLM_MODEL_PHASE2
     temperature = LLM_TEMPERATURE
 
     rows = customers_with_profiles[["customer_id", "profile_text"]].to_dict("records")

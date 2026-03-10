@@ -8,56 +8,49 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 
 def build_narrative_system_prompt() -> str:
-    """Return the system prompt for Phase 1 narrative generation.
-
-    Instructs the LLM to transform structured customer features into a
-    concise, structured narrative that highlights satisfaction signals.
-
-    Returns:
-        System prompt string.
-    """
     return (
-        "You are a customer experience analyst. "
-        "You receive structured e-commerce data for a single customer and "
-        "produce a clear, concise narrative summary. "
-        "Always respond in the following exact format — do not add extra sections:\n\n"
-        "Customer Summary:\n"
-        "<2-3 sentence overview of the customer's purchase history>\n\n"
-        "Key Positive Signals:\n"
-        "* <signal>\n"
-        "* <signal>\n\n"
-        "Key Negative Signals:\n"
-        "* <signal>\n"
-        "* <signal>\n\n"
-        "Notable Events:\n"
-        "* <specific event, e.g. an order delivered 20 days late>\n\n"
-        "If a section has nothing to report, write '* None'."
+        "You convert structured e-commerce customer metrics into a strict, "
+        "fixed-format customer behavior summary.\n\n"
+
+        "Rules:\n"
+        "- Only describe the provided metrics.\n"
+        "- Do NOT infer satisfaction probability.\n"
+        "- Do NOT add assumptions.\n"
+        "- Keep all numeric values exactly as provided.\n"
+        "- Include every metric exactly once in the metric lines.\n"
+        "- Add exactly one final natural-language sentence in the Summary line.\n"
+        "- Do not add any extra fields or commentary.\n\n"
+
+        "Output format:\n\n"
+        "Customer Behavior Summary\n\n"
+        "Orders: <number>\n"
+        "Total spend: <value> BRL\n"
+        "Average item price: <value> BRL\n"
+        "Average freight value: <value> BRL\n"
+        "Average delivery time: <value> days\n"
+        "Late delivery ratio: <value>\n"
+        "Maximum delivery delay: <value> days\n"
+        "Product categories purchased: <number>\n"
+        "Payment types used: <number>\n"
+        "Summary: <one sentence summary in natural language>"
     )
 
 
 def build_narrative_user_prompt(features: dict, customer_id: Optional[str] = None) -> str:
-    """Build the Phase 1 user prompt from structured customer features.
-
-    Args:
-        features: Dict of aggregated customer-level metrics.
-        customer_id: Optional identifier included as a comment for tracing.
-
-    Returns:
-        User prompt string.
-    """
     cid_line = f"Customer ID: {customer_id}\n" if customer_id else ""
     return (
         f"{cid_line}"
-        f"Number of orders: {features.get('num_orders', 'N/A')}\n"
-        f"Average item price (BRL): {features.get('avg_price', 'N/A')}\n"
-        f"Average freight value (BRL): {features.get('avg_freight', 'N/A')}\n"
-        f"Average delivery time (days): {features.get('avg_delivery_time', 'N/A')}\n"
+        "Customer purchase metrics:\n\n"
+        f"Orders: {features.get('num_orders', 'N/A')}\n"
+        f"Total spend: {features.get('total_spend', 'N/A')} BRL\n"
+        f"Average item price: {features.get('avg_price', 'N/A')} BRL\n"
+        f"Average freight value: {features.get('avg_freight', 'N/A')} BRL\n"
+        f"Average delivery time: {features.get('avg_delivery_time', 'N/A')} days\n"
         f"Late delivery ratio: {features.get('late_delivery_ratio', 'N/A')}\n"
-        f"Distinct product categories: {features.get('num_product_categories', 'N/A')}\n"
-        f"Distinct payment types used: {features.get('num_payment_types', 'N/A')}\n"
-        f"Max single delivery delay (days): {features.get('max_delay_days', 'N/A')}\n"
-        f"Total spend (BRL): {features.get('total_spend', 'N/A')}\n\n"
-        "Please generate the structured customer narrative."
+        f"Maximum delivery delay: {features.get('max_delay_days', 'N/A')} days\n"
+        f"Product categories purchased: {features.get('num_product_categories', 'N/A')}\n"
+        f"Payment types used: {features.get('num_payment_types', 'N/A')}\n\n"
+        "Generate output in the exact required format and include exactly one Summary sentence."
     )
 
 

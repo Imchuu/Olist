@@ -5,7 +5,7 @@ from pathlib import Path
 # -----------------------------------------------------------------------------
 # Paths
 # -----------------------------------------------------------------------------
-INPUT_PATH = Path("ML/data/olist_sampled_10k.csv")
+INPUT_PATH = Path("ML/data/dataset.csv")
 OUTPUT_PATH = Path("ML/results/llm_predictions.csv")
 PHASE1_OUTPUT_PATH = Path("ML/results/phase1_narratives.csv")
 
@@ -21,7 +21,7 @@ SAMPLING_SEED_ADJUSTMENT = 0
 LOCAL_API_BASE_URL = "http://localhost:1234/v1"
 
 # User-requested explicit phase model names.
-LLM_MODEL_PHASE1 = "qwen2.5-14b-instruct"
+LLM_MODEL_PHASE1 = "qwen2.5-7b-instruct"
 LLM_MODEL_PHASE2 = "deepseek-r1-distill-qwen-14b"
 
 # Default model used when call site does not specify phase explicitly.
@@ -41,7 +41,7 @@ PROGRESS_LOG_EVERY_N = 50
 MAX_CUSTOMERS = 0
 
 # Number of worker threads for concurrent LLM requests. Set 1 to disable multithreading.
-MAX_WORKERS = 50
+MAX_WORKERS = 100
 
 # -----------------------------------------------------------------------------
 # Data schema and parsing
