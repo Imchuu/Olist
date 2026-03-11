@@ -41,7 +41,7 @@ PROGRESS_LOG_EVERY_N = 50
 MAX_CUSTOMERS = 0
 
 # Number of worker threads for concurrent LLM requests. Set 1 to disable multithreading.
-MAX_WORKERS = 100
+MAX_WORKERS = 10
 
 # -----------------------------------------------------------------------------
 # Data schema and parsing
