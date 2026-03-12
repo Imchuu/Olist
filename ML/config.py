@@ -22,26 +22,26 @@ LOCAL_API_BASE_URL = "http://localhost:1234/v1"
 
 # User-requested explicit phase model names.
 LLM_MODEL_PHASE1 = "qwen2.5-7b-instruct"
-LLM_MODEL_PHASE2 = "deepseek-r1-distill-qwen-14b"
+LLM_MODEL_PHASE2 = "deepseek-r1-distill-llama-8b"
 
 # Default model used when call site does not specify phase explicitly.
 LLM_MODEL = LLM_MODEL_PHASE2
 
-LLM_TEMPERATURE = 0.0
+LLM_TEMPERATURE = 0.15
 PHASE1_MAX_TOKENS = 120
-PHASE2_MAX_TOKENS = 24
-REQUEST_TIMEOUT = 120
+PHASE2_MAX_TOKENS = 600  # DeepSeek R1 needs tokens for <think> block + final answer
+REQUEST_TIMEOUT = 240
 CONNECTION_CHECK_TIMEOUT = 5
 CHAT_ENDPOINT = "/chat/completions"
 MAX_RETRIES = 3
-RETRY_DELAY_SECONDS = 2.0
+RETRY_DELAY_SECONDS = 3.0
 PROGRESS_LOG_EVERY_N = 50
 
 # Set to 0 to process all customers. Use a small value for speed benchmarking.
 MAX_CUSTOMERS = 0
 
 # Number of worker threads for concurrent LLM requests. Set 1 to disable multithreading.
-MAX_WORKERS = 10
+MAX_WORKERS = 4
 
 # -----------------------------------------------------------------------------
 # Data schema and parsing
@@ -70,5 +70,5 @@ DATETIME_COLUMNS = [
 # -----------------------------------------------------------------------------
 # Pipeline behavior
 # -----------------------------------------------------------------------------
-STOP_AFTER_PHASE1 = True
+STOP_AFTER_PHASE1 = False
 FAIL_FAST_ON_LLM_ERROR = True

@@ -73,11 +73,13 @@ def build_system_prompt() -> str:
         "You will receive a narrative summary of a customer's purchase history. "
         "Based on the narrative, estimate the probability that this customer's "
         "overall experience results in a POSITIVE review (score 4 or 5 out of 5).\n\n"
+        "Use a fine-grained continuous probability estimate, not coarse bins. "
+        "Avoid defaulting to step values like 0.85/0.90/0.95 unless truly justified.\n\n"
         "Respond in this exact format — nothing else:\n\n"
         "Reasoning:\n"
         "<2-4 sentences explaining the key factors driving your estimate>\n\n"
         "Probability:\n"
-        "<a single decimal number between 0 and 1, e.g. 0.73>"
+        "<a decimal number between 0 and 1 with exactly 6 digits after the decimal point, e.g. 0.586495>"
     )
 
 

@@ -14,9 +14,19 @@ _PROB_PATTERN = re.compile(
 
 # Fallback: any standalone decimal in [0, 1] at end of response
 _FALLBACK_PATTERN = re.compile(
-    r"\b(0\.\d{1,4}|1\.0{1,4})\b",
+    r"\b(0\.\d{1,8}|1\.0{1,8})\b",
     re.IGNORECASE,
 )
+
+
+# Strip <think>...</think> reasoning blocks produced by DeepSeek R1 and
+# similar chain-of-thought models before scanning for the answer.
+_THINK_PATTERN = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_think_blocks(text: str) -> str:
+    """Remove <think>...</think> CoT blocks from a DeepSeek R1 response."""
+    return _THINK_PATTERN.sub("", text).strip()
 
 
 def parse_probability_from_response(text: str) -> Optional[float]:
@@ -29,8 +39,9 @@ def parse_probability_from_response(text: str) -> Optional[float]:
         Probability:
         <float between 0 and 1>
 
-    Falls back to scanning the entire response for any decimal in [0, 1]
-    if the primary pattern does not match.
+    Strips <think>...</think> blocks (DeepSeek R1 chain-of-thought) before
+    parsing.  Falls back to scanning the entire response for any decimal in
+    [0, 1] if the primary pattern does not match.
 
     Args:
         text: Raw LLM response string.
@@ -41,6 +52,9 @@ def parse_probability_from_response(text: str) -> Optional[float]:
     if not text or not text.strip():
         logger.warning("parse_probability_from_response received empty text.")
         return None
+
+    # Remove CoT reasoning blocks so they don't interfere with parsing.
+    text = _strip_think_blocks(text)
 
     # Primary: look for "Probability: <value>"
     match = _PROB_PATTERN.search(text)

@@ -46,7 +46,7 @@ if __package__ in (None, ""):
     from ML.profile_generator import generate_all_profiles  # type: ignore
     from ML.prompt_builder import build_system_prompt, build_user_prompt  # type: ignore
     from ML.llm_predictor import call_llm, check_local_llm_connection  # type: ignore
-    from ML.probability_parser import safe_parse_probability  # type: ignore
+    from ML.probability_parser import parse_probability_from_response  # type: ignore
     from ML.utils import (  # type: ignore
         ProgressBar,
         append_csv_row,
@@ -74,7 +74,7 @@ else:
     from .profile_generator import generate_all_profiles
     from .prompt_builder import build_system_prompt, build_user_prompt
     from .llm_predictor import call_llm, check_local_llm_connection
-    from .probability_parser import safe_parse_probability
+    from .probability_parser import parse_probability_from_response
     from .utils import (
         ProgressBar,
         append_csv_row,
@@ -213,7 +213,36 @@ def run_flow2_pipeline() -> pd.DataFrame:
             logger.error("Phase 2 LLM call failed for customer %s: %s", cid, exc)
             response_text = ""
 
-        prob = safe_parse_probability(response_text, default=0.5)
+        prob = parse_probability_from_response(response_text)
+
+        # If parsing fails, run a lightweight second pass that only extracts
+        # one probability number from the same response text.
+        if prob is None and response_text.strip():
+            extraction_system_prompt = (
+                "You are a strict numeric extractor. Return only one probability number "
+                "between 0 and 1 with 6 decimal places. No extra text."
+            )
+            extraction_user_prompt = (
+                "Extract the final probability from this model response. "
+                "If no valid probability exists, return exactly 0.500000.\n\n"
+                f"{response_text}"
+            )
+            try:
+                extraction_text = call_llm(
+                    system_prompt=extraction_system_prompt,
+                    user_prompt=extraction_user_prompt,
+                    model=model,
+                    temperature=0.0,
+                    max_tokens=24,
+                )
+                prob = parse_probability_from_response(extraction_text)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Probability extraction retry failed for customer %s: %s", cid, exc)
+
+        if prob is None:
+            prob = 0.5
+            logger.warning("Using default probability 0.50 for customer %s after parse retries.", cid)
+
         return idx, cid, prob
 
     completed = 0
