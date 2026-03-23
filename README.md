@@ -1,4 +1,4 @@
-# Olist Customer Satisfaction System
+# Hybrid ML–LLM Customer Satisfaction Prediction System
 
 This repository implements an end-to-end customer satisfaction prediction system for the Olist use case, combining three complementary approaches:
 
